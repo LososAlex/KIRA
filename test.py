@@ -2,6 +2,7 @@ import pygame as pg
 import os
 import sys
 import random
+import win32api
 
 
 class KIRA:
@@ -28,6 +29,36 @@ class KIRA:
         # Записываем данные с файла в список
         with open(fullpath, 'r') as PlayFile:
             self.playlist = [line.strip() for line in PlayFile]
+
+    def search(self, disk, name, exp):
+        disk = disk + ':\\'
+        list_files = []
+        for root, dirs, files in os.walk(disk):
+            for file in files:
+                if name:
+                    if name in file:
+                        if exp:
+                            if file.endswith(exp):
+                                list_files.append(os.path.join(root, file))
+                        else:
+                            list_files.append(os.path.join(root, file))
+                else:
+                    if exp:
+                        if file.endswith(exp):
+                            list_files.append(os.path.join(root, file))
+                    else:
+                        list_files.append(os.path.join(root, file))
+        return list_files
+
+    def start_file(self, disk, name):
+        file = self.search(disk, name, '.exe')
+        if len(file) == 1:
+            win32api.WinExec(file[0])
+            print('Готово!')
+        elif len(file) > 1:
+            print('Ошибка! Файлов по вашим параметрам оказалось несколько. Запуск невозможен')
+        else:
+            print('Ошибка! Файл не найден!')
 
     def check_commands(self, sentence):
         if 'выключи музыку' in sentence.lower():
@@ -62,6 +93,29 @@ class KIRA:
             value = [int(i) for i in sentence.split() if i.isdigit()][0] / 100
             self.volume = value
             pg.mixer.music.set_volume(self.volume)
+        if 'найди файл' in sentence.lower():
+            disk = input('На каком диске вы хотите найти файл: ')
+            name_true = input('Ищете ли вы файл по имени? ').lower()
+            if name_true == 'да':
+                name = input('Укажите имя файла: ')
+            else:
+                name = None
+            exp_true = input('Ищете ли вы файл с определенным расширением? ')
+            if exp_true == 'да':
+                exp = input('Введите расширение файла формата ".расширение": ')
+            else:
+                exp = None
+            list_files = self.search(disk, name, exp)
+            if len(list_files) == 1:
+                print('Файл находится в каталоге:', list_files[0])
+            elif len(list_files) > 1:
+                print('Найденных файлов несколько и находятся они в этих каталогах:\n', '\n'.join(list_files), sep='')
+            else:
+                print('Не найдено ни одного файла по вашим параметрам')
+        if 'запусти файл' in sentence.lower():
+            disk = input('Введите диск, на котором лежит файл: ')
+            name = input('Введите имя файла: ')
+            self.start_file(disk, name)
 
     def main(self):
         print('''Привет. Я Кира - бот-помощник.
@@ -73,6 +127,9 @@ class KIRA:
     - Убавь громкость на *значение в процентах* - убавить музыку
     - Прибавь громкость на *значение в процентах* - прибавить музыку
     - Установить громкость на *значение в процентах* - установить громкость на какое-то значение 
+- Файлы:
+    - Найди файлы - поиск файлов по вашим параметрам, которые вы указываете в процессе
+    - Запусти файл - открывает файл с расширением .exe
 - Выход - завершить сеанс со мной''')
 
         # Основной цикл программы
@@ -89,4 +146,5 @@ class KIRA:
                     self.play_music()
 
 
-KIRA().main()
+if __name__ == '__main__':
+    KIRA().main()
