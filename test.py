@@ -30,24 +30,31 @@ class KIRA:
         with open(fullpath, 'r') as PlayFile:
             self.playlist = [line.strip() for line in PlayFile]
 
-    def search(self, disk, name, exp):
-        disk = disk + ':\\'
+    def search(self, path, name, exp, search_dir=False):
         list_files = []
-        for root, dirs, files in os.walk(disk):
-            for file in files:
-                if name:
-                    if name in file:
+        for root, dirs, files in os.walk(path):
+            if not search_dir:
+                for file in files:
+                    if name:
+                        if name in file:
+                            if exp:
+                                if file.endswith(exp):
+                                    list_files.append(os.path.join(root, file))
+                            else:
+                                list_files.append(os.path.join(root, file))
+                    else:
                         if exp:
                             if file.endswith(exp):
                                 list_files.append(os.path.join(root, file))
                         else:
                             list_files.append(os.path.join(root, file))
-                else:
-                    if exp:
-                        if file.endswith(exp):
-                            list_files.append(os.path.join(root, file))
+            else:
+                for dir in dirs:
+                    if name:
+                        if name in dir:
+                            list_files.append(os.path.join(root, dir))
                     else:
-                        list_files.append(os.path.join(root, file))
+                        list_files.append(os.path.join(root, dir))
         return list_files
 
     def start_file(self, disk, name):
@@ -64,12 +71,14 @@ class KIRA:
         if 'выключи музыку' in sentence.lower():
             self.player = False
             pg.quit()
+            print('Готово!')
         if 'включи музыку' in sentence.lower() and not self.player:
             self.create_playlist(input('Напишите название плейлиста для запуска: '))
             pg.init()
             pg.display.set_mode((200, 100))
             pg.mixer.init(frequency=44100, channels=2, buffer=4096)
             self.player = True
+            print('Готово!')
         if 'следующая' in sentence.lower():
             self.play_music()
         if 'выход' in sentence.lower():
@@ -82,6 +91,7 @@ class KIRA:
                 self.volume = 0
                 print('Громкость на минимальном значении')
             pg.mixer.music.set_volume(self.volume)
+            print('Готово!')
         if 'прибавь громкость на' in sentence.lower():
             value = [int(i) for i in sentence.split() if i.isdigit()][0] / 100
             self.volume += value
@@ -89,12 +99,14 @@ class KIRA:
                 self.volume = 1
                 print('Громкость на максимальном значении')
             pg.mixer.music.set_volume(self.volume)
+            print('Готово!')
         if 'установить громкость на' in sentence.lower():
             value = [int(i) for i in sentence.split() if i.isdigit()][0] / 100
             self.volume = value
             pg.mixer.music.set_volume(self.volume)
+            print('Готово!')
         if 'найди файл' in sentence.lower():
-            disk = input('На каком диске вы хотите найти файл: ')
+            path = input('Введите путь откуда хотите начать поиск папки: ')
             name_true = input('Ищете ли вы файл по имени? ').lower()
             if name_true == 'да':
                 name = input('Укажите имя файла: ')
@@ -105,17 +117,50 @@ class KIRA:
                 exp = input('Введите расширение файла формата ".расширение": ')
             else:
                 exp = None
-            list_files = self.search(disk, name, exp)
+            list_files = self.search(path, name, exp)
             if len(list_files) == 1:
                 print('Файл находится в каталоге:', list_files[0])
             elif len(list_files) > 1:
                 print('Найденных файлов несколько и находятся они в этих каталогах:\n', '\n'.join(list_files), sep='')
             else:
                 print('Не найдено ни одного файла по вашим параметрам')
+            print('Готово!')
         if 'запусти файл' in sentence.lower():
             disk = input('Введите диск, на котором лежит файл: ')
             name = input('Введите имя файла: ')
             self.start_file(disk, name)
+        if 'браузер' in sentence.lower():
+            print('''У вас есть три варианта развития событий:
+    - Введите поисковой запрос
+    - Введите ссылку на сайт формата "https://site.com", на который вы хотите попасть
+    - Ничего не писать и тогда просто запустится браузер''')
+            url = input('Введите ваш запрос описанный выше или нажмите Enter для запуска браузера: ')
+            if url:
+                if 'https://' not in url:
+                    url = 'https://yandex.ru/search/?text=' + '%20'.join(url.split())
+                os.popen('start {}'.format(url))
+            else:
+                os.popen('start https://yandex.ru')
+            print('Готово!')
+        if 'открой папку' in sentence.lower():
+            url = input('Введите путь до папки: ')
+            os.popen('explorer {}'.format(url))
+            print('Готово!')
+        if 'найди папку' in sentence.lower():
+            path = input('Введите путь откуда хотите начать поиск папки: ')
+            name_true = input('Ищете ли вы папку по имени? ').lower()
+            if name_true == 'да':
+                name = input('Укажите имя папки: ')
+            else:
+                name = None
+            list_files = self.search(path, name, None, search_dir=True)
+            if len(list_files) == 1:
+                print('Папка находится в каталоге:', list_files[0])
+            elif len(list_files) > 1:
+                print('Найденных папок несколько и находятся они в этих каталогах:\n', '\n'.join(list_files), sep='')
+            else:
+                print('Не найдено ни одной папки по вашим параметрам')
+            print('Готово!')
 
     def main(self):
         print('''Привет. Я Кира - бот-помощник.
@@ -130,6 +175,10 @@ class KIRA:
 - Файлы:
     - Найди файлы - поиск файлов по вашим параметрам, которые вы указываете в процессе
     - Запусти файл - открывает файл с расширением .exe
+    - Найди папку - поиск папок по вашим параметрам, которые вы указываете в процессе
+    - Открой папку - открывает папку по вашему пути
+- Выход в интернет:
+    - Браузер - открывает браузер по вашим параметрам
 - Выход - завершить сеанс со мной''')
 
         # Основной цикл программы
