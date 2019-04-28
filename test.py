@@ -2,7 +2,8 @@ import os
 import sys
 import random
 import win32api
-from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog, QLabel, QWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog, QLabel, QWidget, QSystemTrayIcon, QAction, QMenu,\
+    QStyle, QSlider
 from PyQt5.QtMultimedia import QMediaPlaylist, QMediaPlayer, QMediaContent
 from PyQt5.QtCore import QUrl
 from PyQt5.QtGui import QPixmap
@@ -11,87 +12,50 @@ import requests
 
 
 # Виджет для просмотра картинок
-class ImageViewer(QWidget):
-    def __init__(self, image_path, parent=None):
+class MapViewer(QWidget):
+    def __init__(self, address, parent=None):
         super().__init__(parent)
+
+        self.image = self.get_map(address)
+
         # Инициализиреум картинку
-        label = QLabel(self)
-        pixmap = QPixmap(image_path)
-        label.setPixmap(pixmap)
-        # Удаляем картинку, если она временная
-        if 'temp.' in image_path:
-            os.remove(image_path)
+        self.label = QLabel(self)
+        pixmap = QPixmap(self.image)
+        self.label.setPixmap(pixmap)
         # Настраиваем окно под картинку
         self.resize(pixmap.width(), pixmap.height())  # fit window to the image
         self.setWindowTitle('Ваша картинка')
+        self.slider = QSlider(self)
+        self.slider.setGeometry(0, 0, 22, pixmap.height())
+        self.slider.setValue(100)
+        self.slider.valueChanged[int].connect(self.changeValue)
 
-
-class KIRA(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        # Создаем переменную строки, но задаем ей значение None
-        self.string = None
-        # Загружаем GUI
-        uic.loadUi('example.ui', self)
-        # Настраиваем GUI
-        self.pushButton.setText('Ответить')
-        self.pushButton.clicked.connect(self.catch)
-        # Устанавливаем начальное значение громкости музыки
-        self.volume = 50
-        # Создаем объект список для плейлиста, это нужно для перемешки треков в функции mix.
-        # Является копией оригинального плейлиста
-        self.playlist_list = []
-        # Создаем плейлист и плеер
-        self.playlist = QMediaPlaylist(self)
-        self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
-        self.player = QMediaPlayer()
-        self.player_on = False
-        # Задаем начальную громкость плееру
-        self.player.setVolume(self.volume)
-
-    # Функция вывода текста, так называемый print
-    def append_text(self, text):
-        self.textEdit.append(text)
-
-    # Функция доставания текста из строки, так называемый input
-    def get_text(self):
-        self.string = self.lineEdit.text()
-        self.lineEdit.clear()
-        self.append_text(self.string)
-        return self.string
-
-    # Показавыает диалоговое окно с вопросом, ответ на который возвращается
-    def showDialog(self, question):
-        text, ok = QInputDialog.getText(self, 'У меня есть вопрос', question)
-        if ok:
-            return str(text)
-
-    # Открывает окно с картинкой
-    def image(self, directory):
-        self.image_viewer = ImageViewer(directory)
-        self.image_viewer.show()
+    def changeValue(self, value):
+        delta = value / 10000
+        lower, upper = self.bbox.split('~')
+        lower = str(float(lower.split(',')[0]) - delta) + ',' + str(float(lower.split(',')[1]) - delta)
+        upper = str(float(upper.split(',')[0]) + delta) + ',' + str(float(upper.split(',')[1]) + delta)
+        self.bbox = lower + '~' + upper
+        request = "https://static-maps.yandex.ru/1.x/?bbox={}&l={}&ll={}&pt={},pm2ntl".format(self.bbox, self.l,
+                                                                                              self.ll, self.ll)
+        image = self.create_img(request, 'temp')
+        pixmap = QPixmap(image)
+        self.label.setPixmap(pixmap)
 
     # Функция показа карты по координатам
-    def get_map(self):
-        address = self.showDialog('Введите адрес или координаты (через запятую):').split(', ')
-        if address[1].isdigit() and address[0].isdigit() and len(address) == 2:
-            ll = address[1] + ',' + address[0]
-        else:
-            geocoder_request = "http://geocode-maps.yandex.ru/1.x/?geocode={}&format=json".format(', '.join(address))
-            coors = self.geocoder_request(geocoder_request).split()
-            ll = coors[0] + ',' + coors[1]
-        z = self.showDialog('Задайте масштаб от 1 до 18')
-        accept = self.showDialog('Показать карту со спутника?:')
-        if accept.lower() == 'да':
-            l = 'sat'
-        else:
-            l = 'map'
-        request = "https://static-maps.yandex.ru/1.x/?z={}&l={}&ll={}&pt={},pm2ntl".format(z, l, ll, ll)
-        if l == 'sat':
+    def get_map(self, address):
+        geocoder_request = "http://geocode-maps.yandex.ru/1.x/?geocode={}&format=json".format(address)
+        answer = self.geocoder_request(geocoder_request)
+        coors = answer[0].split()
+        self.ll = coors[0] + ',' + coors[1]
+        self.bbox = answer[1]
+        self.l = 'map'
+        request = "https://static-maps.yandex.ru/1.x/?bbox={}&l={}&ll={}&pt={},pm2ntl".format(self.bbox, self.l, self.ll, self.ll)
+        if self.l == 'sat':
             image = self.create_img(request, 'temp', True)
         else:
             image = self.create_img(request, 'temp')
-        self.image(image)
+        return image
 
     def geocoder_request(self, request):
         response = None
@@ -101,7 +65,10 @@ class KIRA(QMainWindow):
                 json_response = response.json()
 
                 toponym = json_response['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']
-                toponym_address = toponym['metaDataProperty']['GeocoderMetaData']['text']
+                toponym_lower = toponym['boundedBy']['Envelope']['lowerCorner'].split()
+                toponym_upper = toponym['boundedBy']['Envelope']['upperCorner'].split()
+                boundedBy = toponym_lower[0] + ',' + toponym_lower[1] + '~' + toponym_upper[0] + ',' + \
+                            toponym_upper[1]
                 toponym_coordinates = toponym['Point']['pos']
             else:
                 print("Ошибка выполнения запроса:")
@@ -109,7 +76,7 @@ class KIRA(QMainWindow):
                 print('Http статус: ', response.status_code, "(", response.reason, ')')
         except:
             print('Запрос не удалось выполнить. Проверьте подключение к сети интернет.')
-        return toponym_coordinates
+        return [toponym_coordinates, boundedBy]
 
     # Функция создания временной картинки карты
     def create_img(self, request, name, sat=False):
@@ -139,30 +106,167 @@ class KIRA(QMainWindow):
             sys.exit(2)
         return map_file
 
+    def closeEvent(self, event):
+        os.remove(self.image)
+
+
+class Player(QWidget):
+    def __init__(self, playlist, playlist_copy, parent=None):
+        super().__init__(parent)
+        uic.loadUi('player.ui', self)
+
+        # Устанавливаем начальное значение громкости музыки
+        self.volume = 50
+        # Создаем объект список для плейлиста, это нужно для перемешки треков в функции mix.
+        # Является копией оригинального плейлиста
+        self.playlist_list = playlist_copy
+        # Создаем плейлист и плеер
+        self.playlist = playlist
+        self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
+        self.player = QMediaPlayer()
+        # Задаем начальную громкость плееру
+        self.player.setVolume(self.volume)
+        self.player.setPlaylist(self.playlist)
+
+        # self.slider.setFocusPolicy(Qt.NoFocus)
+        self.slider.valueChanged[int].connect(self.changeValue)
+
+        self.pushButton.clicked.connect(self.play_music)
+        self.pushButton_2.clicked.connect(self.next)
+        self.pushButton_3.clicked.connect(self.prev)
+        self.pushButton_4.clicked.connect(self.mix)
+        self.pushButton_5.clicked.connect(self.pause)
+
+    def mix(self):
+        # Останавливаем плеер и очищаем плейлист
+        self.player.stop()
+        self.playlist.clear()
+        # С помощью копии перемешиваем треки в сам плейлист
+        playlist_copy = self.playlist_list
+        for i in range(len(self.playlist_list)):
+            track = random.choice(playlist_copy)
+            del playlist_copy[playlist_copy.index(track)]
+            self.playlist.addMedia(track)
+        # Добавляем плейлист в плеер и запускаем плеер
+        self.player.setPlaylist(self.playlist)
+        self.player.play()
+
+    def next(self):
+        self.playlist.next()
+        print(self.playlist.currentMedia().canonicalUrl())
+
+    def prev(self):
+        self.playlist.previous()
+        print(self.playlist.currentMedia().canonicalUrl())
+
+    def play_music(self):
+        self.player.play()
+
+    def changeValue(self, value):
+        self.volume = value
+        self.player.setVolume(self.volume)
+
+    def closeEvent(self, event):
+        self.playlist.clear()
+        self.player.stop()
+
+    def pause(self):
+        self.player.pause()
+
+
+class KIRA(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        # Создаем переменную строки, но задаем ей значение None
+        self.string = None
+        # Загружаем GUI
+        uic.loadUi('example.ui', self)
+        # Настраиваем GUI
+        self.pushButton.setText('Ответить')
+        self.pushButton.clicked.connect(self.catch)
+
+        self.player_widget = QWidget()
+
+        # Инициализируем QSystemTrayIcon
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+
+        '''
+            Объявим и добавим действия для работы с иконкой системного трея
+            show - показать окно
+            hide - скрыть окно
+            exit - выход из программы
+        '''
+        show_action = QAction("Show", self)
+        quit_action = QAction("Exit", self)
+        hide_action = QAction("Hide", self)
+        show_action.triggered.connect(self.show)
+        hide_action.triggered.connect(self.hide)
+        quit_action.triggered.connect(QApplication.quit)
+        tray_menu = QMenu()
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(hide_action)
+        tray_menu.addAction(quit_action)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
+
+    # Функция вывода текста, так называемый print
+    def append_text(self, text):
+        self.textEdit.append(text)
+
+    # Функция доставания текста из строки, так называемый input
+    def get_text(self):
+        self.string = self.lineEdit.text()
+        self.lineEdit.clear()
+        self.append_text(self.string)
+        return self.string
+
+    # Показавыает диалоговое окно с вопросом, ответ на который возвращается
+    def showDialog(self, question):
+        text, ok = QInputDialog.getText(self, 'У меня есть вопрос', question)
+        if ok:
+            return str(text)
+
+    # Открывает окно с картинкой
+    def show_map(self):
+        self.map_viewer = MapViewer(self.showDialog('Введите адрес или координаты (через запятую):'))
+        self.map_viewer.show()
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
+        self.tray_icon.showMessage(
+            "Кира бот-помощник",
+            "Если что я в трее)",
+            QSystemTrayIcon.Information,
+            100
+        )
+
     # Запуск музыки
     def play_music(self):
-        # Если плейлист пустой, то спрашивает название и создает новый
-        if self.playlist.isEmpty():
-            self.create_playlist(self.showDialog('Введите название плейлиста:'))
-            self.player.setPlaylist(self.playlist)
-        self.player.play()
+        playlist, playlist_list = self.create_playlist(self.showDialog('Введите название плейлиста:'))
+        self.player_widget = Player(playlist, playlist_list)
+        self.player_widget.show()
 
     # Функция создания плейлиста
     def create_playlist(self, name):
+        playlist = QMediaPlaylist()
+        playlist_list = []
         # Ловим название плейлиста и создаем путь
         path = 'data\\playlists\\'
         playlist_name = str(name) + '.txt'
         fullpath = path + playlist_name
         # Записываем данные с файла в список
         with open(fullpath, 'r') as PlayFile:
-            playlist = [line.strip() for line in PlayFile]
-        for track in playlist:
+            playlist_txt = [line.strip() for line in PlayFile]
+        for track in playlist_txt:
             url = QUrl.fromLocalFile(track)
             content = QMediaContent(url)
             # Добавляем треки в списочную копию плейлиста
-            self.playlist_list.append(content)
+            playlist_list.append(content)
             # Затем в сам плейлист
-            self.playlist.addMedia(content)
+            playlist.addMedia(content)
+        return playlist, playlist_list
 
     # Функция перемешивания треков
     def mix(self):
@@ -235,35 +339,23 @@ class KIRA(QMainWindow):
     
     # Функция проверки запросов пользователя
     def check_commands(self, sentence):
-        if 'включи музыку' in sentence.lower() and not self.player_on:
+        if '!команды' in sentence.lower():
+            self.append_text('''Доступные команды на данный момент, если данные команды будут в вашем предложении, то тогда команда будет выполнена:
+- Включи плеер - открывает плеер с музыкой
+- Создай плейлист -  создание плейлиста из треков в указанной директории
+- Браузер - открывает браузер по вашим параметрам
+- Покажи карту - показывает карту по вашим параметрам
+- Файлы:
+    - Найди файлы - поиск файлов по вашим параметрам, которые вы указываете в процессе
+    - Запусти файл - открывает файл *Оговорка, в названии файла не должно быть пробелов! Замените их на _*
+    - Найди папку - поиск папок по вашим параметрам, которые вы указываете в процессе
+    - Открой папку - открывает папку по вашему пути
+- Выключи пк - выключение пк через какое-то время
+- Переведи пк в режим гибернации - переход пк в режим гибернации
+- Отмена выключения пк - отмена отключения пк
+- Выход - завершить сеанс со мной''')
+        if 'включи плеер' in sentence.lower() and not self.player_widget.isVisible():
             self.play_music()
-            self.player_on = True
-        if self.player_on:
-            if 'выключи музыку' in sentence.lower():
-                self.player.stop()
-                self.player_on = False
-                self.append_text('Готово!')
-            if 'следующий трек' in sentence.lower():
-                self.playlist.next()
-            if 'предыдущий трек' in sentence.lower():
-                self.playlist.previous()
-            if 'убавь громкость' in sentence.lower():
-                self.volume -= int(self.showDialog('На какое значение вы хотите убавить громкость?'))
-                if self.volume < 0:
-                    self.volume = 0
-                    self.append_text('Вы достигли минимальной громкости')
-                self.player.setVolume(self.volume)
-            if 'прибавь громкость' in sentence.lower():
-                self.volume += int(self.showDialog('На какое значение вы хотите прибавить громкость?'))
-                if self.volume > 100:
-                    self.volume = 100
-                    self.append_text('Вы достигли максимальной громкости')
-                self.player.setVolume(self.volume)
-            if 'установи громкость' in sentence.lower():
-                self.volume = int(self.showDialog('На какое значение вы хотите установить громкость?'))
-                self.player.setVolume(self.volume)
-            if 'перемешать треки' in sentence.lower():
-                self.mix()
         if 'создай плейлист' in sentence.lower():
             self.playlist_from_dir_to_txt()
             self.append_text('Готово!')
@@ -336,36 +428,11 @@ class KIRA(QMainWindow):
             self.append_text('До следующей встречи ;)')
             sys.exit()
         if 'покажи карту' in sentence.lower():
-            self.get_map()
+            self.show_map()
 
     # Функция приветствия с пользователем
     def hello(self):
-        self.append_text('''Привет. Я Кира - бот-помощник.
-Доступные команды на данный момент, если данные команды будут в вашем предложении, то тогда команда будет выполнена:
-- Музыка:
-    - Включи музыку - запустить музыку
-    *Следующие команды не работают, пока вы не включите музыку*
-    - Создай плейлист -  создание плейлиста из треков в указанной директории
-    - Следующий трек - следующий трек
-    - Предыдущий трек - предыдущий трек
-    - Выключи музыку - выключить музыку
-    - Убавь громкость - убавить музыку
-    - Прибавь громкость - прибавить музыку
-    - Установи громкость - установить громкость на какое-то значение
-    - Перемешать треки - перемешать треки в плейлисте 
-- Файлы:
-    - Найди файлы - поиск файлов по вашим параметрам, которые вы указываете в процессе
-    - Запусти файл - открывает файл *Оговорка, в названии файла не должно быть пробелов! Замените их на _*
-    - Найди папку - поиск папок по вашим параметрам, которые вы указываете в процессе
-    - Открой папку - открывает папку по вашему пути
-- Выход в интернет:
-    - Браузер - открывает браузер по вашим параметрам
-- Экспериментальные функции:
-    - Покажи карту - показывает карту по вашим параметрам
-- Выключи пк - выключение пк через какое-то время
-- Переведи пк в режим гибернации - переход пк в режим гибернации
-- Отмена выключения пк - отмена отключения пк
-- Выход - завершить сеанс со мной''')
+        self.append_text('Привет. Я Кира - бот-помощник. Чтобы посмотреть список команд напишите !команды')
 
     # Функция ловли команды из строки
     def catch(self):
