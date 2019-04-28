@@ -2,10 +2,28 @@ import os
 import sys
 import random
 import win32api
-from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog
+from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog, QLabel, QWidget
 from PyQt5.QtMultimedia import QMediaPlaylist, QMediaPlayer, QMediaContent
 from PyQt5.QtCore import QUrl
+from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
+import requests
+
+
+# Виджет для просмотра картинок
+class ImageViewer(QWidget):
+    def __init__(self, image_path, parent=None):
+        super().__init__(parent)
+        # Инициализиреум картинку
+        label = QLabel(self)
+        pixmap = QPixmap(image_path)
+        label.setPixmap(pixmap)
+        # Удаляем картинку, если она временная
+        if 'temp.' in image_path:
+            os.remove(image_path)
+        # Настраиваем окно под картинку
+        self.resize(pixmap.width(), pixmap.height())  # fit window to the image
+        self.setWindowTitle('Ваша картинка')
 
 
 class KIRA(QMainWindow):
@@ -27,6 +45,7 @@ class KIRA(QMainWindow):
         self.playlist = QMediaPlaylist(self)
         self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
         self.player = QMediaPlayer()
+        self.player_on = False
         # Задаем начальную громкость плееру
         self.player.setVolume(self.volume)
 
@@ -46,6 +65,79 @@ class KIRA(QMainWindow):
         text, ok = QInputDialog.getText(self, 'У меня есть вопрос', question)
         if ok:
             return str(text)
+
+    # Открывает окно с картинкой
+    def image(self, directory):
+        self.image_viewer = ImageViewer(directory)
+        self.image_viewer.show()
+
+    # Функция показа карты по координатам
+    def get_map(self):
+        address = self.showDialog('Введите адрес или координаты (через запятую):').split(', ')
+        if address[1].isdigit() and address[0].isdigit() and len(address) == 2:
+            ll = address[1] + ',' + address[0]
+        else:
+            geocoder_request = "http://geocode-maps.yandex.ru/1.x/?geocode={}&format=json".format(', '.join(address))
+            coors = self.geocoder_request(geocoder_request).split()
+            ll = coors[0] + ',' + coors[1]
+        z = self.showDialog('Задайте масштаб от 1 до 18')
+        accept = self.showDialog('Показать карту со спутника?:')
+        if accept.lower() == 'да':
+            l = 'sat'
+        else:
+            l = 'map'
+        request = "https://static-maps.yandex.ru/1.x/?z={}&l={}&ll={}&pt={},pm2ntl".format(z, l, ll, ll)
+        if l == 'sat':
+            image = self.create_img(request, 'temp', True)
+        else:
+            image = self.create_img(request, 'temp')
+        self.image(image)
+
+    def geocoder_request(self, request):
+        response = None
+        try:
+            response = requests.get(request)
+            if response:
+                json_response = response.json()
+
+                toponym = json_response['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']
+                toponym_address = toponym['metaDataProperty']['GeocoderMetaData']['text']
+                toponym_coordinates = toponym['Point']['pos']
+            else:
+                print("Ошибка выполнения запроса:")
+                print(request)
+                print('Http статус: ', response.status_code, "(", response.reason, ')')
+        except:
+            print('Запрос не удалось выполнить. Проверьте подключение к сети интернет.')
+        return toponym_coordinates
+
+    # Функция создания временной картинки карты
+    def create_img(self, request, name, sat=False):
+        response = None
+        try:
+            response = requests.get(request)
+
+            if not response:
+                print("Ошибка выполнения запроса:")
+                print(request)
+                print("Http статус:", response.status_code, "(", response.reason, ")")
+                sys.exit(1)
+        except:
+            print("Запрос не удалось выполнить. Проверьте наличие сети Интернет.")
+            sys.exit(1)
+
+        # Запишем полученное изображение в файл.
+        if sat:
+            map_file = "{}.jpg".format(name)
+        else:
+            map_file = "{}.png".format(name)
+        try:
+            with open(map_file, "wb") as file:
+                file.write(response.content)
+        except IOError as ex:
+            print("Ошибка записи временного файла:", ex)
+            sys.exit(2)
+        return map_file
 
     # Запуск музыки
     def play_music(self):
@@ -96,7 +188,7 @@ class KIRA(QMainWindow):
         name_playlist = self.showDialog('Введите название для этого плейлиста:')
         path = 'data\\playlists\\' + name_playlist + '.txt'
         # Записываем данные в файл
-        with open(path, 'w') as f:
+        with open(path, 'w', errors='ignore') as f:
             f.write(music)
 
     # Функция поиска папок или файлов
@@ -143,11 +235,13 @@ class KIRA(QMainWindow):
     
     # Функция проверки запросов пользователя
     def check_commands(self, sentence):
-        if 'включи музыку' in sentence.lower() and not self.player.isAudioAvailable():
+        if 'включи музыку' in sentence.lower() and not self.player_on:
             self.play_music()
-        if self.player.isAudioAvailable():
+            self.player_on = True
+        if self.player_on:
             if 'выключи музыку' in sentence.lower():
                 self.player.stop()
+                self.player_on = False
                 self.append_text('Готово!')
             if 'следующий трек' in sentence.lower():
                 self.playlist.next()
@@ -241,6 +335,8 @@ class KIRA(QMainWindow):
         if 'выход' in sentence.lower():
             self.append_text('До следующей встречи ;)')
             sys.exit()
+        if 'покажи карту' in sentence.lower():
+            self.get_map()
 
     # Функция приветствия с пользователем
     def hello(self):
@@ -264,6 +360,8 @@ class KIRA(QMainWindow):
     - Открой папку - открывает папку по вашему пути
 - Выход в интернет:
     - Браузер - открывает браузер по вашим параметрам
+- Экспериментальные функции:
+    - Покажи карту - показывает карту по вашим параметрам
 - Выключи пк - выключение пк через какое-то время
 - Переведи пк в режим гибернации - переход пк в режим гибернации
 - Отмена выключения пк - отмена отключения пк
