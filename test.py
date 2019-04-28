@@ -11,41 +11,51 @@ from PyQt5 import uic
 class KIRA(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.player = False
-        self.volume = 50
+        # Создаем переменную строки, но задаем ей значение None
         self.string = None
+        # Загружаем GUI
         uic.loadUi('example.ui', self)
+        # Настраиваем GUI
         self.pushButton.setText('Ответить')
-        self.pushButton.clicked.connect(self.ok)
+        self.pushButton.clicked.connect(self.catch)
+        # Устанавливаем начальное значение громкости музыки
+        self.volume = 50
+        # Создаем объект список для плейлиста, это нужно для перемешки треков в функции mix.
+        # Является копией оригинального плейлиста
         self.playlist_list = []
-
+        # Создаем плейлист и плеер
         self.playlist = QMediaPlaylist(self)
         self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
         self.player = QMediaPlayer()
+        # Задаем начальную громкость плееру
         self.player.setVolume(self.volume)
 
+    # Функция вывода текста, так называемый print
     def append_text(self, text):
         self.textEdit.append(text)
 
+    # Функция доставания текста из строки, так называемый input
     def get_text(self):
         self.string = self.lineEdit.text()
         self.lineEdit.clear()
         self.append_text(self.string)
         return self.string
 
+    # Показавыает диалоговое окно с вопросом, ответ на который возвращается
     def showDialog(self, question):
         text, ok = QInputDialog.getText(self, 'У меня есть вопрос', question)
         if ok:
             return str(text)
 
+    # Запуск музыки
     def play_music(self):
+        # Если плейлист пустой, то спрашивает название и создает новый
         if self.playlist.isEmpty():
             self.create_playlist(self.showDialog('Введите название плейлиста:'))
             self.player.setPlaylist(self.playlist)
-        else:
-            print(1)
         self.player.play()
 
+    # Функция создания плейлиста
     def create_playlist(self, name):
         # Ловим название плейлиста и создаем путь
         path = 'data\\playlists\\'
@@ -57,28 +67,39 @@ class KIRA(QMainWindow):
         for track in playlist:
             url = QUrl.fromLocalFile(track)
             content = QMediaContent(url)
+            # Добавляем треки в списочную копию плейлиста
             self.playlist_list.append(content)
+            # Затем в сам плейлист
             self.playlist.addMedia(content)
 
+    # Функция перемешивания треков
     def mix(self):
+        # Останавливаем плеер и очищаем плейлист
         self.player.stop()
         self.playlist.clear()
+        # С помощью копии перемешиваем треки в сам плейлист
         playlist_copy = self.playlist_list
         for i in range(len(self.playlist_list)):
             track = random.choice(playlist_copy)
             del playlist_copy[playlist_copy.index(track)]
             self.playlist.addMedia(track)
+        # Добавляем плейлист в плеер и запускаем плеер
         self.player.setPlaylist(self.playlist)
         self.player.play()
 
+    # Функция создания плейлиста из папки в txt
     def playlist_from_dir_to_txt(self):
+        # Спрашиваем путь к папке
         directory = self.showDialog('Введите путь к папке, где лежит музыка:')
         music = '\n'.join(self.search(directory, None, '.mp3'))
+        # Спрашиваем, как пользователь хочет назвать плейлист
         name_playlist = self.showDialog('Введите название для этого плейлиста:')
         path = 'data\\playlists\\' + name_playlist + '.txt'
+        # Записываем данные в файл
         with open(path, 'w') as f:
             f.write(music)
 
+    # Функция поиска папок или файлов
     def search(self, path, name, exp, search_dir=False):
         list_files = []
         for root, dirs, files in os.walk(path):
@@ -98,19 +119,20 @@ class KIRA(QMainWindow):
                         else:
                             list_files.append(os.path.join(root, file))
             else:
-                for dir in dirs:
+                for directory in dirs:
                     if name:
-                        if name in dir:
-                            list_files.append(os.path.join(root, dir))
+                        if name in directory:
+                            list_files.append(os.path.join(root, directory))
                     else:
-                        list_files.append(os.path.join(root, dir))
+                        list_files.append(os.path.join(root, directory))
         return list_files
 
-    def start_file(self, dir, name):
+    # Функция запуска файлов
+    def start_file(self, directory, name):
         name = name.split('.')
         name, exp = name
         exp = '.' + exp
-        file = self.search(dir, name, exp)
+        file = self.search(directory, name, exp)
         if len(file) == 1:
             os.popen('start {}'.format(str(file[0])))
             self.append_text('Готово!')
@@ -118,7 +140,8 @@ class KIRA(QMainWindow):
             self.append_text('Ошибка! Файлов по вашим параметрам оказалось несколько. Запуск невозможен')
         else:
             self.append_text('Ошибка! Файл не найден!')
-
+    
+    # Функция проверки запросов пользователя
     def check_commands(self, sentence):
         if 'включи музыку' in sentence.lower() and not self.player.isAudioAvailable():
             self.play_music()
@@ -166,7 +189,8 @@ class KIRA(QMainWindow):
             if len(list_files) == 1:
                 self.append_text('Файл находится в каталоге: ' + list_files[0])
             elif len(list_files) > 1:
-                self.append_text('Найденных файлов несколько и находятся они в этих каталогах:\n' + '\n'.join(list_files))
+                self.append_text('Найденных файлов несколько и находятся они в этих каталогах:\n'
+                                 + '\n'.join(list_files))
             else:
                 self.append_text('Не найдено ни одного файла по вашим параметрам')
             self.append_text('Готово!')
@@ -202,19 +226,23 @@ class KIRA(QMainWindow):
             if len(list_files) == 1:
                 self.append_text('Папка находится в каталоге:' + list_files[0])
             elif len(list_files) > 1:
-                self.append_text('Найденных папок несколько и находятся они в этих каталогах:\n' + '\n'.join(list_files))
+                self.append_text('Найденных папок несколько и находятся они в этих каталогах:\n'
+                                 + '\n'.join(list_files))
             else:
                 self.append_text('Не найдено ни одной папки по вашим параметрам')
             self.append_text('Готово!')
         if 'выключи пк' in sentence.lower():
             sec = self.showDialog('Через сколько секунд выключить ПК?')
             os.popen('shutdown /s /t {}'.format(sec))
+        if 'переведи пк в режим гибернации' in sentence.lower():
+            os.popen('shutdown /h')
         if 'отмена выключения пк' in sentence.lower():
             os.popen('shutdown /a')
         if 'выход' in sentence.lower():
             self.append_text('До следующей встречи ;)')
             sys.exit()
 
+    # Функция приветствия с пользователем
     def hello(self):
         self.append_text('''Привет. Я Кира - бот-помощник.
 Доступные команды на данный момент, если данные команды будут в вашем предложении, то тогда команда будет выполнена:
@@ -237,10 +265,12 @@ class KIRA(QMainWindow):
 - Выход в интернет:
     - Браузер - открывает браузер по вашим параметрам
 - Выключи пк - выключение пк через какое-то время
+- Переведи пк в режим гибернации - переход пк в режим гибернации
 - Отмена выключения пк - отмена отключения пк
 - Выход - завершить сеанс со мной''')
 
-    def ok(self):
+    # Функция ловли команды из строки
+    def catch(self):
         # Ловим команды
         self.string = self.get_text()
         # Проверяем команды
