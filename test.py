@@ -15,7 +15,7 @@ import requests
 class MapViewer(QWidget):
     def __init__(self, address, parent=None):
         super().__init__(parent)
-
+        # Создаем картинку карты
         self.image = self.get_map(address)
 
         # Инициализиреум картинку
@@ -25,13 +25,16 @@ class MapViewer(QWidget):
         # Настраиваем окно под картинку
         self.resize(pixmap.width(), pixmap.height())  # fit window to the image
         self.setWindowTitle('Ваша картинка')
+        # Создаем слайдер для регулировки масштаба
         self.slider = QSlider(self)
         self.slider.setGeometry(0, 0, 22, pixmap.height())
         self.slider.setValue(100)
         self.slider.valueChanged[int].connect(self.changeValue)
 
+    # Ловим изменение слайдера и изменяем масштаб
     def changeValue(self, value):
         delta = value / 10000
+        # Делаем изменение масштаба и создаем новую картинку
         lower, upper = self.bbox.split('~')
         lower = str(float(lower.split(',')[0]) - delta) + ',' + str(float(lower.split(',')[1]) - delta)
         upper = str(float(upper.split(',')[0]) + delta) + ',' + str(float(upper.split(',')[1]) + delta)
@@ -39,6 +42,7 @@ class MapViewer(QWidget):
         request = "https://static-maps.yandex.ru/1.x/?bbox={}&l={}&ll={}&pt={},pm2ntl".format(self.bbox, self.l,
                                                                                               self.ll, self.ll)
         image = self.create_img(request, 'temp')
+        # Инициализируем картинку в окно
         pixmap = QPixmap(image)
         self.label.setPixmap(pixmap)
 
@@ -268,21 +272,6 @@ class KIRA(QMainWindow):
             playlist.addMedia(content)
         return playlist, playlist_list
 
-    # Функция перемешивания треков
-    def mix(self):
-        # Останавливаем плеер и очищаем плейлист
-        self.player.stop()
-        self.playlist.clear()
-        # С помощью копии перемешиваем треки в сам плейлист
-        playlist_copy = self.playlist_list
-        for i in range(len(self.playlist_list)):
-            track = random.choice(playlist_copy)
-            del playlist_copy[playlist_copy.index(track)]
-            self.playlist.addMedia(track)
-        # Добавляем плейлист в плеер и запускаем плеер
-        self.player.setPlaylist(self.playlist)
-        self.player.play()
-
     # Функция создания плейлиста из папки в txt
     def playlist_from_dir_to_txt(self):
         # Спрашиваем путь к папке
@@ -294,6 +283,78 @@ class KIRA(QMainWindow):
         # Записываем данные в файл
         with open(path, 'w', errors='ignore') as f:
             f.write(music)
+
+    def get_near_org(self):
+        address = self.showDialog('От какого адреса или координаты вы хотите начать?').split(', ')
+        name = self.showDialog('Какой ближайщий объект вы хотите найти?').lower()
+
+        if len(address) == 2:
+            geocoder_request = "http://geocode-maps.yandex.ru/1.x/?geocode={},{}&format=json".format(address[1], address[0])
+        else:
+            geocoder_request = "http://geocode-maps.yandex.ru/1.x/?geocode={}&format=json".format(address)
+        response = None
+        try:
+            response = requests.get(geocoder_request)
+            if response:
+                json_response = response.json()
+
+                toponym = json_response['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']
+                toponym_coordinates = toponym['Point']['pos'].split()
+                address_ll = '{},{}'.format(toponym_coordinates[0], toponym_coordinates[1])
+            else:
+                print("Ошибка выполнения запроса:")
+                print(geocoder_request)
+                print('Http статус: ', response.status_code, "(", response.reason, ')')
+        except:
+            print('Запрос не удалось выполнить. Проверьте подключение к сети интернет.')
+
+        search_api_server = "https://search-maps.yandex.ru/v1/"
+        api_key = "dda3ddba-c9ea-4ead-9010-f43fbc15c6e3"
+
+        search_params = {
+            "apikey": api_key,
+            "text": name,
+            "lang": "ru_RU",
+            "ll": address_ll,
+            "type": "biz"
+        }
+
+        bad = False
+        response = None
+        try:
+            response = requests.get(search_api_server, params=search_params)
+
+            if response:
+                # Преобразуем ответ в json-объект
+                json_response = response.json()
+
+                if len(json_response["features"]) > 0:
+                    # Получаем первую найденную организацию.
+                    organization = json_response["features"][0]
+
+                    # Название организации.
+                    org_name = organization["properties"]["CompanyMetaData"]["name"]
+                    # Адрес организации.
+                    org_address = organization["properties"]["CompanyMetaData"]["address"]
+                    # Получаем координаты ответа.
+                    point = organization["geometry"]["coordinates"]
+                else:
+                    bad = True
+            else:
+                print("Ошибка выполнения запроса:")
+                print(geocoder_request)
+                print('Http статус: ', response.status_code, "(", response.reason, ')')
+        except:
+            print('Запрос не удалось выполнить. Проверьте подключение к сети интернет.')
+
+        if not bad:
+            self.append_text('Ближайщий объект типа "{}" находится по адресу "{}" и называется "{}"'.format(name,
+                                                                                                       org_address,
+                                                                                                       org_name))
+            self.append_text('Если вы хотите посмотреть на карте где это находится, то напишите команду "Покажи карту".'
+                             'И в поле ввода адреса или координат введите эти координаты этой организации: {}'.format(point))
+        else:
+            self.append_text('Рядом с указанным адресом ничего не найдено по вашему запросу')
 
     # Функция поиска папок или файлов
     def search(self, path, name, exp, search_dir=False):
@@ -341,10 +402,11 @@ class KIRA(QMainWindow):
     def check_commands(self, sentence):
         if '!команды' in sentence.lower():
             self.append_text('''Доступные команды на данный момент, если данные команды будут в вашем предложении, то тогда команда будет выполнена:
-- Включи плеер - открывает плеер с музыкой
+- Включи плеер - запускает плеер с музыкой
 - Создай плейлист -  создание плейлиста из треков в указанной директории
 - Браузер - открывает браузер по вашим параметрам
 - Покажи карту - показывает карту по вашим параметрам
+- Найди ближайщий объект - поиск ближайщего объекта по вашим параметрам
 - Файлы:
     - Найди файлы - поиск файлов по вашим параметрам, которые вы указываете в процессе
     - Запусти файл - открывает файл *Оговорка, в названии файла не должно быть пробелов! Замените их на _*
@@ -429,6 +491,8 @@ class KIRA(QMainWindow):
             sys.exit()
         if 'покажи карту' in sentence.lower():
             self.show_map()
+        if 'найди ближайщий объект' in sentence.lower():
+            self.get_near_org()
 
     # Функция приветствия с пользователем
     def hello(self):
